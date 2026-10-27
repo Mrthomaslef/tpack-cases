@@ -1,0 +1,48 @@
+[
+  {
+    "id": "DEMO-TPACK-2026-01",
+    "title": "Nodule Hépatique Hypervasculaire & Fracture Costale (TDM Double Pack + IRM T2)",
+    "modality": "CT",
+    "anatomicalRegion": "Thorax / Abdomen",
+    "difficulty": "Intermédiaire",
+    "clinicalHistory": "Patient de 54 ans consultant pour une douleur basithoracique et de l'hypochondre droit suite à un traumatisme mineur. Un scanner thoraco-abdominal injecté au temps artériel tardif et une séquence IRM T2 sont réalisés.",
+    "question": "À l'aide de l'outil Règle [M] et du basculement de fenêtres [1: Os / 2: Mou], quel est le diamètre exact du nodule hépatique sur la coupe #13 et quelle lésion osseuse traumatique associée observe-t-on ?",
+    "choices": [
+      "Nodule hépatique hypervasculaire de 24,0 mm + fracture unicorticale costale antéro-latérale",
+      "Nodule hépatique de 11,5 mm + tassement du corps vertébral",
+      "Angiome hépatique de 42,0 mm sans lésion osseuse",
+      "Dissection de l'aorte abdominale calcifiée"
+    ],
+    "correctChoiceIndex": 0,
+    "explanation": "Sur la coupe #13/24 en fenêtre Parties Molles (WL 50 / WW 350), on mesure une lésion focale hépatique à couronne hypervasculaire de 24,0 mm de diamètre exact (calibration 0,5 mm/px). En basculant sur la fenêtre Os (WL 400 / WW 1800) sur cette même coupe, on visualise le trait de refend cortical sur l'arc costal. En série 2 (IRM T2), le centre de la lésion apparaît en franc hypersignal T2.",
+    "keySliceIndex": 12,
+    "keyWindowKey": "soft",
+    "keySeriesId": "s1_tdm_abdo",
+    "createdAt": "2026-10-27T05:00:00Z",
+    "byteSize": 295000,
+    "source": "public_catalog"
+  },
+  {
+    "id": "DEMO-TPACK-2026-02",
+    "title": "Caractérisation Tissulaire en IRM T2 & Analyse Rachidienne",
+    "modality": "MR",
+    "anatomicalRegion": "Abdomen / Rachis",
+    "difficulty": "Débutant",
+    "clinicalHistory": "Complément d'exploration en IRM pondérée T2 Fast Spin Echo pour caractériser la composante liquidienne/nécrotique centrale de la lésion hépatique et vérifier le canal rachidien.",
+    "question": "Comment se traduit le signal du liquide cérébro-spinal (LCR) dans le canal rachidien et du centre de la lésion cible sur cette séquence IRM pondérée T2 ?",
+    "choices": [
+      "En franc hypersignal (blanc brillant) sur la séquence T2",
+      "En vide de signal (noir) identique à l'os cortical",
+      "En hyposignal T2 homogène",
+      "Non analysable sans injection de gadolinium"
+    ],
+    "correctChoiceIndex": 0,
+    "explanation": "En pondération T2, l'eau libre (LCR intracanalaire) et les zones liquidiennes/nécrotiques centrales apparaissent en franc hypersignal (blanc), tandis que la corticale osseuse vertébrale apparaît en hyposignal (noir).",
+    "keySliceIndex": 8,
+    "keyWindowKey": "default",
+    "keySeriesId": "s2_irm_t2",
+    "createdAt": "2026-10-27T05:30:00Z",
+    "byteSize": 295000,
+    "source": "public_catalog"
+  }
+]

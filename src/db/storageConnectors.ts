@@ -101,11 +101,19 @@ export function buildClinicalCaseFromManifest(
   const keyWindowKey =
     manifest.keyWindowKey || firstSeries?.availableWindows?.[0]?.key || 'default';
 
+  const cleanFallback = fallbackName.replace(/\.(tpack|zip)$/i, '');
+  const resolvedId = manifest.caseId || cleanFallback || `CAS-${Date.now()}`;
+  const nameParts = resolvedId.split('-');
+  const inferredRegion =
+    nameParts.length >= 4 && ['CT', 'MR', 'RX'].includes(nameParts[0].toUpperCase())
+      ? nameParts[1].replace(/_/g, ' ')
+      : '';
+
   return {
-    id: manifest.caseId || fallbackName.replace(/\.tpack$/i, '') || `CAS-${Date.now()}`,
-    title: manifest.title || fallbackName.replace(/\.tpack$/i, ''),
+    id: resolvedId,
+    title: manifest.title || cleanFallback,
     modality: manifest.modality || 'CT',
-    anatomicalRegion: manifest.anatomicalRegion || '',
+    anatomicalRegion: manifest.anatomicalRegion || inferredRegion,
     clinicalHistory: manifest.clinicalHistory || '',
     diagnosis: manifest.diagnosis || '',
     keySliceIndex,

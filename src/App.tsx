@@ -139,7 +139,13 @@ export const App: React.FC = () => {
     const q = normalizeText(searchQuery.trim());
     const words = q.split(/\s+/).filter(Boolean);
     return allCases.filter((c) => {
-      if (filterModality !== 'ALL' && c.modality !== filterModality) return false;
+      if (filterModality !== 'ALL') {
+        if (filterModality === 'RX') {
+          if (!['RX', 'CR', 'DX', 'XA'].includes(c.modality)) return false;
+        } else if (c.modality !== filterModality) {
+          return false;
+        }
+      }
       if (words.length === 0) return true;
       const answerText = normalizeText(getCaseAnswerText(c));
       if (searchInAnswerOnly) {
@@ -338,7 +344,7 @@ export const App: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${c.id.toLowerCase()}.tpack`;
+    a.download = `${c.id}.tpack`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -761,7 +767,7 @@ export const App: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-1 overflow-x-auto">
-                    {(['ALL', 'CT', 'MR', 'CR', 'US'] as const).map((mod) => (
+                    {(['ALL', 'CT', 'MR', 'RX'] as const).map((mod) => (
                       <button
                         key={mod}
                         type="button"

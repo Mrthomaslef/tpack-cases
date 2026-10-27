@@ -9,7 +9,7 @@ export interface PedagogicalManifest {
   formatVersion: "1.0";
   caseId: string;
   title: string;
-  modality: "MR" | "CT" | "CR" | "DX" | "XA" | "US";
+  modality: "MR" | "CT" | "RX" | "CR" | "DX" | "XA" | "US";
   anatomicalRegion?: string;
   clinicalHistory?: string;
   diagnosis?: string;
@@ -40,7 +40,7 @@ export interface PedagogicalManifest {
 export interface ClinicalCaseItem {
   id: string;
   title: string;
-  modality: "MR" | "CT" | "CR" | "DX" | "XA" | "US";
+  modality: "MR" | "CT" | "RX" | "CR" | "DX" | "XA" | "US";
   anatomicalRegion: string;
   clinicalHistory: string;
   diagnosis: string;

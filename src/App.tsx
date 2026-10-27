@@ -11,7 +11,11 @@ import {
   PanelRightOpen,
   Eye,
   EyeOff,
-  Upload,
+  FolderOpen,
+  Cloud,
+  RefreshCw,
+  Search,
+  X,
 } from 'lucide-react';
 import { ClinicalCaseItem } from './types';
 import {
@@ -21,6 +25,14 @@ import {
   deleteClinicalCaseFromIndexedDB,
   inspectTPackFile,
 } from './db/casesDb';
+import {
+  buildClinicalCaseFromManifest,
+  connectAndScanLocalDirectory,
+  getSavedDirectoryHandle,
+  loadSavedGoogleDriveConfig,
+  supportsFileSystemAccessApi,
+  syncFromGoogleDrive,
+} from './db/storageConnectors';
 
 const PROD_VIEWER_EMBED_URL = 'https://mrthomaslef.github.io/dicomviewer/?embed=1';
 
@@ -29,26 +41,49 @@ export const App: React.FC = () => {
   const [publicCases, setPublicCases] = useState<ClinicalCaseItem[]>([]);
   const [activeCase, setActiveCase] = useState<ClinicalCaseItem | null>(null);
   const [filterModality, setFilterModality] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Volet droit pliable (foldable)
   const [isSidePanelOpen, setIsSidePanelOpen] = useState<boolean>(true);
-  // Affichage / masquage du diagnostic pour l'auto-évaluation
   const [showDiagnosis, setShowDiagnosis] = useState<boolean>(false);
+
+  // Dossier local mémorisé (FileSystemDirectoryHandle)
+  const [savedDirHandle, setSavedDirHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [connectedFolderName, setConnectedFolderName] = useState<string | null>(null);
+
+  // État de synchronisation (Dossier local ou Google Drive)
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+
+  // Modal Google Drive Cloud
+  const [showDriveModal, setShowDriveModal] = useState<boolean>(false);
+  const [driveFolderUrl, setDriveFolderUrl] = useState<string>('');
+  const [driveApiKey, setDriveApiKey] = useState<string>('');
+  const [driveError, setDriveError] = useState<string | null>(null);
 
   const viewerIframeRef = useRef<HTMLIFrameElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderFallbackInputRef = useRef<HTMLInputElement | null>(null);
 
   const refreshCases = useCallback(async () => {
-    const [loc, pub] = await Promise.all([
+    const [loc, pub, handle] = await Promise.all([
       listClinicalCasesFromIndexedDB(),
       fetchPublicCatalog(),
+      getSavedDirectoryHandle(),
     ]);
     setLocalCases(loc);
     setPublicCases(pub);
+    if (handle) {
+      setSavedDirHandle(handle);
+      setConnectedFolderName(handle.name);
+    }
   }, []);
 
   useEffect(() => {
     refreshCases();
+    const savedDrive = loadSavedGoogleDriveConfig();
+    setDriveFolderUrl(savedDrive.folderUrlOrId);
+    setDriveApiKey(savedDrive.apiKey);
   }, [refreshCases]);
 
   const allCases = useMemo(() => {
@@ -59,11 +94,20 @@ export const App: React.FC = () => {
   }, [localCases, publicCases]);
 
   const filteredCases = useMemo(() => {
-    if (filterModality === 'ALL') return allCases;
-    return allCases.filter((c) => c.modality === filterModality);
-  }, [allCases, filterModality]);
+    const q = searchQuery.trim().toLowerCase();
+    return allCases.filter((c) => {
+      if (filterModality !== 'ALL' && c.modality !== filterModality) return false;
+      if (!q) return true;
+      return (
+        c.title.toLowerCase().includes(q) ||
+        c.anatomicalRegion.toLowerCase().includes(q) ||
+        c.clinicalHistory.toLowerCase().includes(q) ||
+        c.diagnosis.toLowerCase().includes(q) ||
+        c.id.toLowerCase().includes(q)
+      );
+    });
+  }, [allCases, filterModality, searchQuery]);
 
-  // Envoie le buffer .tpack directement au lecteur embarqué
   const pushCaseToEmbeddedViewer = useCallback((caseItem: ClinicalCaseItem) => {
     const win = viewerIframeRef.current?.contentWindow;
     if (!win) return;
@@ -100,7 +144,6 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('message', handleMessage);
   }, [activeCase, pushCaseToEmbeddedViewer]);
 
-  // Dès que activeCase change et que l'iframe est déjà chargée, pousse le nouveau buffer .tpack
   useEffect(() => {
     if (activeCase) {
       pushCaseToEmbeddedViewer(activeCase);
@@ -125,74 +168,100 @@ export const App: React.FC = () => {
   };
 
   /**
-   * Import direct en 1 clic : extrait toutes les métadonnées (titre, clinique, diagnostic,
-   * coupe clé et annotations) directement depuis le manifest.json interne du fichier .tpack !
+   * Import de fichiers .tpack (glisser-déposer, sélection de fichiers ou dossier fallback)
    */
-  const handleImportTPackFiles = async (files: FileList | File[]) => {
+  const handleImportTPackFiles = async (files: FileList | File[], openSingle: boolean = true) => {
+    const validFiles = Array.from(files).filter(
+      (f) =>
+        (f.name.toLowerCase().endsWith('.tpack') || f.name.toLowerCase().endsWith('.zip')) &&
+        !f.name.startsWith('._')
+    );
+    if (validFiles.length === 0) return;
+
+    setIsSyncing(true);
     let lastImported: ClinicalCaseItem | null = null;
 
-    for (const file of Array.from(files)) {
-      if (!file.name.toLowerCase().endsWith('.tpack') && !file.name.toLowerCase().endsWith('.zip')) {
-        continue;
-      }
-      try {
-        const { manifest, bytes } = await inspectTPackFile(file);
-        const firstSeries = manifest.series?.[0];
-
-        // Recense automatiquement toutes les coupes porteuses d'annotations dans le .tpack
-        const annotatedSlices: { seriesId: string; sliceIndex: number; label: string }[] = [];
-        for (const s of manifest.series || []) {
-          for (const sl of s.slices || []) {
-            if (sl.annotations && sl.annotations.length > 0) {
-              const firstLabel =
-                sl.annotations.find((a) => a.label)?.label || `Coupe #${sl.index + 1}`;
-              annotatedSlices.push({
-                seriesId: s.id,
-                sliceIndex: sl.index,
-                label: firstLabel,
-              });
-            }
-          }
+    try {
+      for (let i = 0; i < validFiles.length; i++) {
+        const file = validFiles[i];
+        setSyncStatus(`Indexation (${i + 1}/${validFiles.length}) : ${file.name}`);
+        try {
+          const { manifest, bytes } = await inspectTPackFile(file);
+          const item = buildClinicalCaseFromManifest(manifest, bytes, file.name, 'indexeddb');
+          await saveClinicalCaseToIndexedDB(item);
+          lastImported = item;
+        } catch {
+          // Ignorer les fichiers invalides
         }
-
-        const keySliceIndex =
-          typeof manifest.keySliceIndex === 'number'
-            ? manifest.keySliceIndex
-            : annotatedSlices.length > 0
-            ? annotatedSlices[0].sliceIndex
-            : Math.floor((firstSeries?.sliceCount || 1) / 2);
-
-        const keyWindowKey =
-          manifest.keyWindowKey || firstSeries?.availableWindows?.[0]?.key || 'default';
-
-        const item: ClinicalCaseItem = {
-          id: manifest.caseId || `CAS-${Date.now()}`,
-          title: manifest.title || file.name.replace(/\.tpack$/i, ''),
-          modality: manifest.modality || 'CT',
-          anatomicalRegion: manifest.anatomicalRegion || '',
-          clinicalHistory: manifest.clinicalHistory || '',
-          diagnosis: manifest.diagnosis || '',
-          keySliceIndex,
-          keyWindowKey,
-          keySeriesId: firstSeries?.id,
-          annotatedSlices,
-          createdAt: new Date().toISOString(),
-          byteSize: bytes.byteLength,
-          source: 'indexeddb',
-          tpackBytes: bytes,
-          manifest,
-        };
-
-        await saveClinicalCaseToIndexedDB(item);
-        lastImported = item;
-      } catch {
-        // Ignorer si le fichier n'est pas un .tpack valide
       }
+      await refreshCases();
+      if (openSingle && validFiles.length === 1 && lastImported) {
+        handleOpenCaseStudy(lastImported);
+      }
+    } finally {
+      setIsSyncing(false);
+      setSyncStatus(null);
+    }
+  };
+
+  /**
+   * Connexion à un dossier local de .tpack (ou dossier Google Drive for Desktop)
+   */
+  const handleConnectLocalFolder = async (useRemembered: boolean = false) => {
+    if (!supportsFileSystemAccessApi()) {
+      folderFallbackInputRef.current?.click();
+      return;
     }
 
-    await refreshCases();
-    if (lastImported) {
-      handleOpenCaseStudy(lastImported);
+    setIsSyncing(true);
+    setSyncStatus('Lecture du dossier .tpack...');
+    try {
+      const { folderName, cases } = await connectAndScanLocalDirectory(
+        useRemembered ? savedDirHandle : null,
+        (cur, tot) => {
+          setSyncStatus(`Synchronisation du dossier (${cur}/${tot})...`);
+        }
+      );
+      setConnectedFolderName(folderName);
+      await refreshCases();
+      if (cases.length === 0) {
+        setSyncStatus(`Aucun fichier .tpack trouvé dans "${folderName}".`);
+        setTimeout(() => setSyncStatus(null), 3000);
+      } else {
+        setSyncStatus(null);
+      }
+    } catch {
+      setSyncStatus(null);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  /**
+   * Synchronisation depuis un dossier Google Drive Cloud via API v3
+   */
+  const handleSyncGoogleDrive = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDriveError(null);
+    setIsSyncing(true);
+    try {
+      const imported = await syncFromGoogleDrive(
+        driveFolderUrl,
+        driveApiKey,
+        (cur, tot, name) => {
+          setSyncStatus(`Google Drive (${cur}/${tot}) : ${name}`);
+        }
+      );
+      await refreshCases();
+      setShowDriveModal(false);
+      if (imported.length === 1) {
+        handleOpenCaseStudy(imported[0]);
+      }
+    } catch (err) {
+      setDriveError(err instanceof Error ? err.message : 'Erreur Google Drive');
+    } finally {
+      setIsSyncing(false);
+      setSyncStatus(null);
     }
   };
 
@@ -222,11 +291,11 @@ export const App: React.FC = () => {
       onDrop={(e) => {
         e.preventDefault();
         if (e.dataTransfer.files?.length) {
-          handleImportTPackFiles(e.dataTransfer.files);
+          handleImportTPackFiles(e.dataTransfer.files, true);
         }
       }}
     >
-      {/* Input caché d'import direct en 1 clic (sans formulaire post-import) */}
+      {/* Inputs cachés pour import de fichiers ou de dossier complet */}
       <input
         ref={fileInputRef}
         type="file"
@@ -235,7 +304,21 @@ export const App: React.FC = () => {
         className="hidden"
         onChange={(e) => {
           if (e.target.files?.length) {
-            handleImportTPackFiles(e.target.files);
+            handleImportTPackFiles(e.target.files, true);
+            e.target.value = '';
+          }
+        }}
+      />
+      <input
+        ref={folderFallbackInputRef}
+        type="file"
+        multiple
+        // @ts-expect-error webkitdirectory pour sélection de dossier complet sur Safari/Firefox/Mobile
+        webkitdirectory="true"
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files?.length) {
+            handleImportTPackFiles(e.target.files, false);
             e.target.value = '';
           }
         }}
@@ -251,7 +334,7 @@ export const App: React.FC = () => {
               className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-cyan-300 flex items-center gap-1 transition cursor-pointer"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Catalogue</span>
+              <span>Base ({allCases.length})</span>
             </button>
           ) : (
             <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
@@ -264,15 +347,57 @@ export const App: React.FC = () => {
           </span>
         </div>
 
+        {/* Boutons de connexion à la bibliothèque (Dossier Local, Google Drive, Fichier) */}
         <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs flex items-center gap-1 transition cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Importer .tpack</span>
-          </button>
+          {!activeCase && (
+            <>
+              {savedDirHandle && (
+                <button
+                  type="button"
+                  onClick={() => handleConnectLocalFolder(true)}
+                  disabled={isSyncing}
+                  className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-cyan-300 flex items-center gap-1 transition cursor-pointer"
+                  title={`Actualiser le dossier local "${connectedFolderName}"`}
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span className="hidden md:inline max-w-[110px] truncate">
+                    {connectedFolderName}
+                  </span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => handleConnectLocalFolder(false)}
+                disabled={isSyncing}
+                className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-medium text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+                title="Pointer vers un dossier local de fichiers .tpack (ou Google Drive Desktop)"
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="hidden sm:inline">Dossier Local</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowDriveModal(true)}
+                disabled={isSyncing}
+                className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-medium text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+                title="Connecter un dossier Google Drive"
+              >
+                <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">Google Drive</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs flex items-center gap-1 transition cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>.tpack</span>
+              </button>
+            </>
+          )}
 
           {activeCase && (
             <button
@@ -290,11 +415,19 @@ export const App: React.FC = () => {
               ) : (
                 <PanelRightOpen className="w-3.5 h-3.5 text-cyan-400" />
               )}
-              <span className="hidden sm:inline">Infos</span>
+              <span>Infos</span>
             </button>
           )}
         </div>
       </header>
+
+      {/* Barre de progression de synchronisation si active */}
+      {syncStatus && (
+        <div className="bg-cyan-950/80 border-b border-cyan-500/30 px-4 py-1.5 text-xs text-cyan-200 flex items-center justify-center gap-2">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+          <span>{syncStatus}</span>
+        </div>
+      )}
 
       {/* VUE 1 : LECTEUR .TPACK PLEIN ÉCRAN + VOLET DROIT PLIABLE */}
       {activeCase ? (
@@ -310,7 +443,6 @@ export const App: React.FC = () => {
             />
           </div>
 
-          {/* VOLET DROIT PLIABLE (lit directement les métadonnées du .tpack) */}
           {isSidePanelOpen && (
             <aside className="w-64 sm:w-72 h-full bg-[#0B101B]/95 backdrop-blur-md border-l border-slate-800 p-3.5 overflow-y-auto flex flex-col gap-3 z-30 absolute right-0 top-0 bottom-0 md:static shrink-0 shadow-2xl">
               <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
@@ -333,7 +465,6 @@ export const App: React.FC = () => {
                 </button>
               </div>
 
-              {/* Information clinique issue du .tpack */}
               {activeCase.clinicalHistory && (
                 <div className="space-y-1">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -345,7 +476,6 @@ export const App: React.FC = () => {
                 </div>
               )}
 
-              {/* Accès direct à la coupe clé et aux annotations du .tpack */}
               <div className="space-y-1.5">
                 <button
                   type="button"
@@ -391,7 +521,6 @@ export const App: React.FC = () => {
                 )}
               </div>
 
-              {/* Diagnostic intégré au .tpack (masqué par défaut pour l'entraînement, révélable en 1 clic) */}
               {activeCase.diagnosis && (
                 <div className="space-y-2 pt-2 border-t border-slate-800/80">
                   <button
@@ -434,44 +563,79 @@ export const App: React.FC = () => {
           )}
         </div>
       ) : (
-        /* VUE 2 : CATALOGUE DE VOS FICHIERS .TPACK */
+        /* VUE 2 : BASE DE DONNÉES DE CAS (.TPACK) */
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
           <div className="max-w-4xl mx-auto space-y-4">
             {allCases.length === 0 ? (
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="mt-12 border-2 border-dashed border-slate-800 hover:border-emerald-500/50 rounded-2xl p-10 flex flex-col items-center justify-center text-center gap-3 cursor-pointer bg-[#0B101B]/60 transition"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                  <Upload className="w-6 h-6" />
-                </div>
-                <div className="text-sm font-semibold text-white">
-                  Glissez-déposez vos fichiers <code className="text-emerald-400">.tpack</code> ici
-                </div>
-                <p className="text-xs text-slate-400 max-w-sm">
-                  Toutes les métadonnées (titre, clinique, diagnostic et annotations) sont lues
-                  automatiquement depuis le fichier <code className="text-slate-300">.tpack</code>.
-                </p>
+              <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Carte 1 : Pointer vers un dossier local ou Google Drive Desktop */}
+                <button
+                  type="button"
+                  onClick={() => handleConnectLocalFolder(false)}
+                  className="border border-slate-800 hover:border-cyan-500/50 rounded-2xl p-6 flex flex-col items-center text-center gap-3 bg-[#0B101B] transition cursor-pointer"
+                >
+                  <div className="w-11 h-11 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                    <FolderOpen className="w-5 h-5" />
+                  </div>
+                  <div className="text-sm font-bold text-white">
+                    Pointer vers un Dossier Local / Google Drive Desktop
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Sélectionnez le dossier contenant vos fichiers <code className="text-cyan-300">.tpack</code> sur votre ordinateur pour charger toute votre base.
+                  </p>
+                </button>
+
+                {/* Carte 2 : Connecter un dossier Google Drive Cloud par lien */}
+                <button
+                  type="button"
+                  onClick={() => setShowDriveModal(true)}
+                  className="border border-slate-800 hover:border-emerald-500/50 rounded-2xl p-6 flex flex-col items-center text-center gap-3 bg-[#0B101B] transition cursor-pointer"
+                >
+                  <div className="w-11 h-11 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                    <Cloud className="w-5 h-5" />
+                  </div>
+                  <div className="text-sm font-bold text-white">
+                    Connecter un Dossier Google Drive (Cloud)
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Synchronisez un dossier Google Drive partagé en ligne pour accéder à votre base depuis n’importe quel appareil.
+                  </p>
+                </button>
               </div>
             ) : (
               <>
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-                  {(['ALL', 'CT', 'MR', 'CR', 'US'] as const).map((mod) => (
-                    <button
-                      key={mod}
-                      type="button"
-                      onClick={() => setFilterModality(mod)}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
-                        filterModality === mod
-                          ? 'bg-cyan-500 text-slate-950 border-cyan-400'
-                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      {mod === 'ALL' ? `Tous (${allCases.length})` : mod}
-                    </button>
-                  ))}
+                {/* Barre de recherche & Filtres par modalité */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="relative flex-1">
+                    <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Rechercher par titre, région, clinique, diagnostic..."
+                      className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-[#0B101B] border border-slate-800 text-xs text-slate-100 focus:border-cyan-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-1 overflow-x-auto">
+                    {(['ALL', 'CT', 'MR', 'CR', 'US'] as const).map((mod) => (
+                      <button
+                        key={mod}
+                        type="button"
+                        onClick={() => setFilterModality(mod)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                          filterModality === mod
+                            ? 'bg-cyan-500 text-slate-950 border-cyan-400'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {mod === 'ALL' ? `Tous (${allCases.length})` : mod}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
+                {/* Grille des Cas */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {filteredCases.map((c) => (
                     <div
@@ -531,7 +695,7 @@ export const App: React.FC = () => {
                                 await refreshCases();
                               }}
                               className="p-1.5 rounded bg-slate-900 hover:bg-red-950/60 text-slate-400 hover:text-red-300"
-                              title="Supprimer"
+                              title="Retirer de la base"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -545,6 +709,95 @@ export const App: React.FC = () => {
             )}
           </div>
         </main>
+      )}
+
+      {/* MODAL DE CONNEXION GOOGLE DRIVE */}
+      {showDriveModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setShowDriveModal(false)}
+        >
+          <div
+            className="bg-[#0B101B] border border-slate-800 rounded-2xl max-w-md w-full p-4 space-y-3 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400">
+                <Cloud className="w-4 h-4" />
+                <span>Connecter un Dossier Google Drive</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDriveModal(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSyncGoogleDrive} className="space-y-3 text-xs">
+              <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 text-[11px] text-slate-300 space-y-1">
+                <div>
+                  <strong className="text-cyan-300">Astuce Mac/PC sans clé API :</strong> si
+                  l&apos;application <em>Google Drive Desktop</em> est installée sur votre
+                  ordinateur, cliquez simplement sur <strong>Dossier Local</strong> et sélectionnez
+                  votre dossier Google Drive.
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-400 block mb-1">
+                  Lien ou ID du dossier Google Drive partagé
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={driveFolderUrl}
+                  onChange={(e) => setDriveFolderUrl(e.target.value)}
+                  placeholder="https://drive.google.com/drive/folders/1A2B3C..."
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-100 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-400 block mb-1">
+                  Clé API Google Drive (mémorisée localement)
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={driveApiKey}
+                  onChange={(e) => setDriveApiKey(e.target.value)}
+                  placeholder="AIzaSy..."
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-100 focus:border-emerald-500 focus:outline-none font-mono"
+                />
+              </div>
+
+              {driveError && (
+                <div className="p-2 rounded bg-red-950/70 border border-red-500/40 text-red-200 text-[11px]">
+                  {driveError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowDriveModal(false)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSyncing}
+                  className="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold cursor-pointer"
+                >
+                  Synchroniser le Drive
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

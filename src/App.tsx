@@ -310,7 +310,12 @@ export const App: React.FC = () => {
 
   return (
     <div
-      className="h-[100dvh] w-screen flex flex-col bg-[#090D16] text-slate-100 overflow-hidden"
+      style={{
+        paddingTop: 'env(safe-area-inset-top, 0px)',
+        paddingLeft: 'env(safe-area-inset-left, 0px)',
+        paddingRight: 'env(safe-area-inset-right, 0px)',
+      }}
+      className="h-[100dvh] w-screen flex flex-col bg-[#090D16] text-slate-100 overflow-hidden box-border"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();

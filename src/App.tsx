@@ -476,89 +476,94 @@ export const App: React.FC = () => {
                 </div>
               )}
 
-              <div className="space-y-1.5">
+              <div className="space-y-2.5 pt-2 border-t border-slate-800/80">
                 <button
                   type="button"
-                  onClick={() =>
-                    sendGotoCommand({
-                      seriesId: activeCase.keySeriesId,
-                      sliceIndex: activeCase.keySliceIndex,
-                      windowKey: activeCase.keyWindowKey,
-                      showAnnotations: true,
-                    })
-                  }
-                  className="w-full py-1.5 px-2.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  onClick={() => {
+                    const next = !showDiagnosis;
+                    setShowDiagnosis(next);
+                    if (next) {
+                      sendGotoCommand({
+                        seriesId: activeCase.keySeriesId,
+                        sliceIndex: activeCase.keySliceIndex,
+                        windowKey: activeCase.keyWindowKey,
+                        showAnnotations: true,
+                      });
+                    } else {
+                      sendGotoCommand({
+                        showAnnotations: false,
+                      });
+                    }
+                  }}
+                  className="w-full py-2 px-2.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
                 >
-                  <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Coupe Clé (#{activeCase.keySliceIndex + 1})</span>
+                  {showDiagnosis ? (
+                    <>
+                      <EyeOff className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Masquer réponse &amp; annotations</span>
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Révéler réponse &amp; annotations</span>
+                    </>
+                  )}
                 </button>
 
-                {activeCase.annotatedSlices && activeCase.annotatedSlices.length > 0 && (
-                  <div className="space-y-1 pt-1">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      Annotations ({activeCase.annotatedSlices.length})
+                {showDiagnosis && (
+                  <div className="space-y-2.5">
+                    <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-500/40 text-xs text-emerald-100 leading-snug">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-1">
+                        Diagnostic &amp; Réponse
+                      </div>
+                      {activeCase.diagnosis || 'Aucun diagnostic textuel spécifié.'}
                     </div>
-                    {activeCase.annotatedSlices.map((ann, i) => (
-                      <button
-                        key={`${ann.seriesId}_${ann.sliceIndex}_${i}`}
-                        type="button"
-                        onClick={() =>
-                          sendGotoCommand({
-                            seriesId: ann.seriesId,
-                            sliceIndex: ann.sliceIndex,
-                            showAnnotations: true,
-                          })
-                        }
-                        className="w-full text-left px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 flex items-center justify-between gap-1 cursor-pointer"
-                      >
-                        <span className="truncate">{ann.label}</span>
-                        <span className="text-[10px] font-mono text-cyan-400 shrink-0">
-                          #{ann.sliceIndex + 1}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
 
-              {activeCase.diagnosis && (
-                <div className="space-y-2 pt-2 border-t border-slate-800/80">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = !showDiagnosis;
-                      setShowDiagnosis(next);
-                      if (next) {
+                    <button
+                      type="button"
+                      onClick={() =>
                         sendGotoCommand({
                           seriesId: activeCase.keySeriesId,
                           sliceIndex: activeCase.keySliceIndex,
                           windowKey: activeCase.keyWindowKey,
                           showAnnotations: true,
-                        });
+                        })
                       }
-                    }}
-                    className="w-full py-1.5 px-2.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
-                  >
-                    {showDiagnosis ? (
-                      <>
-                        <EyeOff className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Masquer le diagnostic</span>
-                      </>
-                    ) : (
-                      <>
-                        <Eye className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Révéler le diagnostic</span>
-                      </>
-                    )}
-                  </button>
+                      className="w-full py-1.5 px-2.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Coupe Clé (#{activeCase.keySliceIndex + 1})</span>
+                    </button>
 
-                  {showDiagnosis && (
-                    <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-500/40 text-xs text-emerald-100 leading-snug">
-                      {activeCase.diagnosis}
-                    </div>
-                  )}
-                </div>
-              )}
+                    {activeCase.annotatedSlices && activeCase.annotatedSlices.length > 0 && (
+                      <div className="space-y-1 pt-1">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          Annotations ({activeCase.annotatedSlices.length})
+                        </div>
+                        {activeCase.annotatedSlices.map((ann, i) => (
+                          <button
+                            key={`${ann.seriesId}_${ann.sliceIndex}_${i}`}
+                            type="button"
+                            onClick={() =>
+                              sendGotoCommand({
+                                seriesId: ann.seriesId,
+                                sliceIndex: ann.sliceIndex,
+                                showAnnotations: true,
+                              })
+                            }
+                            className="w-full text-left px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 flex items-center justify-between gap-1 cursor-pointer"
+                          >
+                            <span className="truncate">{ann.label}</span>
+                            <span className="text-[10px] font-mono text-cyan-400 shrink-0">
+                              #{ann.sliceIndex + 1}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </aside>
           )}
         </div>

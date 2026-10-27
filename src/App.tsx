@@ -43,8 +43,8 @@ export const App: React.FC = () => {
   const [filterModality, setFilterModality] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Volet droit pliable (foldable)
-  const [isSidePanelOpen, setIsSidePanelOpen] = useState<boolean>(true);
+  // Volet droit pliable (fermé par défaut)
+  const [isSidePanelOpen, setIsSidePanelOpen] = useState<boolean>(false);
   const [showDiagnosis, setShowDiagnosis] = useState<boolean>(false);
 
   // Dossier local mémorisé (FileSystemDirectoryHandle)
@@ -112,11 +112,20 @@ export const App: React.FC = () => {
     const win = viewerIframeRef.current?.contentWindow;
     if (!win) return;
 
+    const caseMeta = {
+      title: caseItem.title,
+      clinicalHistory: caseItem.clinicalHistory,
+      diagnosis: caseItem.diagnosis,
+      anatomicalRegion: caseItem.anatomicalRegion,
+      keySliceIndex: caseItem.keySliceIndex,
+    };
+
     if (caseItem.tpackBytes) {
       win.postMessage(
         {
           type: 'TPACK_LOAD_BUFFER',
           buffer: caseItem.tpackBytes,
+          caseMeta,
         },
         '*'
       );
@@ -125,6 +134,7 @@ export const App: React.FC = () => {
         {
           type: 'TPACK_LOAD_URL',
           url: new URL(caseItem.tpackUrl, window.location.href).href,
+          caseMeta,
         },
         '*'
       );
@@ -164,7 +174,7 @@ export const App: React.FC = () => {
   const handleOpenCaseStudy = (c: ClinicalCaseItem) => {
     setActiveCase(c);
     setShowDiagnosis(false);
-    setIsSidePanelOpen(window.innerWidth >= 768);
+    setIsSidePanelOpen(false);
   };
 
   /**

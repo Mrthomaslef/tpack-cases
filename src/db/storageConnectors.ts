@@ -198,7 +198,9 @@ export async function connectAndScanLocalDirectory(
     if (onProgress) onProgress(i + 1, tpackFiles.length);
     try {
       const { manifest, bytes } = await inspectTPackFile(f);
-      const item = buildClinicalCaseFromManifest(manifest, bytes, f.name, 'indexeddb');
+      const item = buildClinicalCaseFromManifest(manifest, bytes, f.name, 'indexeddb', {
+        origin: 'local',
+      });
       await saveClinicalCaseToIndexedDB(item);
       loadedCases.push(item);
     } catch {
@@ -349,7 +351,9 @@ export async function syncFromGoogleDrive(
     const fileObj = new File([blob], entry.name);
     try {
       const { manifest, bytes } = await inspectTPackFile(fileObj);
-      const item = buildClinicalCaseFromManifest(manifest, bytes, entry.name, 'indexeddb');
+      const item = buildClinicalCaseFromManifest(manifest, bytes, entry.name, 'indexeddb', {
+        origin: 'drive',
+      });
       await saveClinicalCaseToIndexedDB(item);
       imported.push(item);
     } catch {

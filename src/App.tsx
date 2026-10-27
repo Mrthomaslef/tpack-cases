@@ -37,6 +37,7 @@ import {
 const PROD_VIEWER_EMBED_URL = 'https://mrthomaslef.github.io/dicomviewer/?embed=1';
 
 export const App: React.FC = () => {
+  const [librarySource, setLibrarySource] = useState<'local' | 'drive'>('local');
   const [localCases, setLocalCases] = useState<ClinicalCaseItem[]>([]);
   const [publicCases, setPublicCases] = useState<ClinicalCaseItem[]>([]);
   const [activeCase, setActiveCase] = useState<ClinicalCaseItem | null>(null);
@@ -86,12 +87,20 @@ export const App: React.FC = () => {
     setDriveApiKey(savedDrive.apiKey);
   }, [refreshCases]);
 
-  const allCases = useMemo(() => {
+  const localLibraryCases = useMemo(() => {
     return [
-      ...localCases,
+      ...localCases.filter((c) => c.origin !== 'drive'),
       ...publicCases.filter((p) => !localCases.some((l) => l.id === p.id)),
     ];
   }, [localCases, publicCases]);
+
+  const driveLibraryCases = useMemo(() => {
+    return localCases.filter((c) => c.origin === 'drive');
+  }, [localCases]);
+
+  const allCases = useMemo(() => {
+    return librarySource === 'local' ? localLibraryCases : driveLibraryCases;
+  }, [librarySource, localLibraryCases, driveLibraryCases]);
 
   const filteredCases = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -197,7 +206,9 @@ export const App: React.FC = () => {
         setSyncStatus(`Indexation (${i + 1}/${validFiles.length}) : ${file.name}`);
         try {
           const { manifest, bytes } = await inspectTPackFile(file);
-          const item = buildClinicalCaseFromManifest(manifest, bytes, file.name, 'indexeddb');
+          const item = buildClinicalCaseFromManifest(manifest, bytes, file.name, 'indexeddb', {
+            origin: 'local',
+          });
           await saveClinicalCaseToIndexedDB(item);
           lastImported = item;
         } catch {
@@ -205,6 +216,7 @@ export const App: React.FC = () => {
         }
       }
       await refreshCases();
+      setLibrarySource('local');
       if (openSingle && validFiles.length === 1 && lastImported) {
         handleOpenCaseStudy(lastImported);
       }
@@ -234,6 +246,7 @@ export const App: React.FC = () => {
       );
       setConnectedFolderName(folderName);
       await refreshCases();
+      setLibrarySource('local');
       if (cases.length === 0) {
         setSyncStatus(`Aucun fichier .tpack trouvé dans "${folderName}".`);
         setTimeout(() => setSyncStatus(null), 3000);
@@ -263,6 +276,7 @@ export const App: React.FC = () => {
         }
       );
       await refreshCases();
+      setLibrarySource('drive');
       setShowDriveModal(false);
       if (imported.length === 1) {
         handleOpenCaseStudy(imported[0]);
@@ -581,6 +595,37 @@ export const App: React.FC = () => {
         /* VUE 2 : BASE DE DONNÉES DE CAS (.TPACK) */
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
           <div className="max-w-4xl mx-auto space-y-4">
+            {/* Sélecteur de Source : Bibliothèque Locale vs Google Drive */}
+            <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-xl bg-[#0B101B] border border-slate-800">
+              <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800/80">
+                <button
+                  type="button"
+                  onClick={() => setLibrarySource('local')}
+                  className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+                    librarySource === 'local'
+                      ? 'bg-cyan-500 text-slate-950 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <FolderOpen className="w-4 h-4 shrink-0" />
+                  <span>Bibliothèque Locale ({localLibraryCases.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setLibrarySource('drive')}
+                  className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+                    librarySource === 'drive'
+                      ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Cloud className="w-4 h-4 shrink-0" />
+                  <span>Mon Google Drive ({driveLibraryCases.length})</span>
+                </button>
+              </div>
+            </div>
+
             {allCases.length === 0 ? (
               <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Carte 1 : Pointer vers un dossier local ou Google Drive Desktop */}

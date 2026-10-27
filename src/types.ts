@@ -55,6 +55,7 @@ export interface ClinicalCaseItem {
   createdAt: string;
   byteSize: number;
   source: "public_catalog" | "indexeddb";
+  origin?: "local" | "drive" | "public";
   tpackUrl?: string;
   tpackBytes?: Uint8Array;
   manifest?: PedagogicalManifest;

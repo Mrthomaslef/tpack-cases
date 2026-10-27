@@ -1,3 +1,10 @@
+export interface AnnotationItem {
+  id: string;
+  type: "arrow" | "circle" | "text";
+  points: [number, number][];
+  label?: string;
+}
+
 export interface PedagogicalManifest {
   formatVersion: "1.0";
   caseId: string;
@@ -5,6 +12,9 @@ export interface PedagogicalManifest {
   modality: "MR" | "CT" | "CR" | "DX" | "XA" | "US";
   anatomicalRegion?: string;
   clinicalHistory?: string;
+  diagnosis?: string;
+  keySliceIndex?: number;
+  keyWindowKey?: string;
   series: {
     id: string;
     description: string;
@@ -19,6 +29,11 @@ export interface PedagogicalManifest {
       label: string;
       folderPath: string;
     }[];
+    slices: {
+      index: number;
+      zPosition: number;
+      annotations?: AnnotationItem[];
+    }[];
   }[];
 }
 
@@ -27,15 +42,16 @@ export interface ClinicalCaseItem {
   title: string;
   modality: "MR" | "CT" | "CR" | "DX" | "XA" | "US";
   anatomicalRegion: string;
-  difficulty: "Débutant" | "Intermédiaire" | "Avancé";
   clinicalHistory: string;
-  question: string;
-  choices: string[];
-  correctChoiceIndex: number;
-  explanation: string;
+  diagnosis: string;
   keySliceIndex: number;
   keyWindowKey: string;
   keySeriesId?: string;
+  annotatedSlices?: {
+    seriesId: string;
+    sliceIndex: number;
+    label: string;
+  }[];
   createdAt: string;
   byteSize: number;
   source: "public_catalog" | "indexeddb";

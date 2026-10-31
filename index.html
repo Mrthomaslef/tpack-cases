@@ -14,5 +14,125 @@
   <body class="bg-[#090D16] text-slate-100 antialiased selection:bg-cyan-500/30 selection:text-cyan-200">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-  </body>
+  
+<!-- Global Mobile Pull-to-Refresh (Drag vers le bas) -->
+<style>
+  html, body { overscroll-behavior-y: contain; }
+  #global-ptr-bar {
+    position: fixed;
+    top: env(safe-area-inset-top, 0px);
+    left: 0;
+    right: 0;
+    height: 0px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 99999;
+    pointer-events: none;
+    opacity: 0;
+    transition: height 0.22s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.18s ease;
+  }
+  #global-ptr-bar.ptr-dragging { transition: none; }
+  #global-ptr-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #F8FAFC;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  @keyframes globalPtrSpin { to { transform: rotate(360deg); } }
+  .global-ptr-spin { animation: globalPtrSpin 0.8s linear infinite; }
+</style>
+<div id="global-ptr-bar">
+  <div id="global-ptr-pill">
+    <svg id="global-ptr-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.15s ease;">
+      <path d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+    </svg>
+    <span id="global-ptr-text">Tirer pour actualiser</span>
+  </div>
+</div>
+<script>
+(function() {
+  if (window.__GLOBAL_PTR_INIT__) return;
+  window.__GLOBAL_PTR_INIT__ = true;
+  function setupPTR() {
+    var bar = document.getElementById("global-ptr-bar");
+    var icon = document.getElementById("global-ptr-icon");
+    var text = document.getElementById("global-ptr-text");
+    if (!bar || !icon || !text) return;
+    var THRESHOLD = 66, MAX_PULL = 110;
+    var startY = 0, pull = 0, pulling = false, refreshing = false;
+    function isAtTop() {
+      return (window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0) <= 2;
+    }
+    function onStart(y) {
+      if (refreshing || !isAtTop()) return;
+      startY = y; pull = 0; pulling = true;
+    }
+    function onMove(y, ev) {
+      if (!pulling || refreshing) return;
+      var delta = y - startY;
+      if (delta <= 0 || !isAtTop()) {
+        if (pull > 0) { bar.style.height = "0px"; bar.style.opacity = "0"; pull = 0; }
+        return;
+      }
+      pull = Math.min(MAX_PULL, Math.pow(delta, 0.82) * 1.55);
+      if (pull > 8 && ev && ev.cancelable) ev.preventDefault();
+      bar.classList.add("ptr-dragging");
+      bar.style.height = pull + "px";
+      bar.style.opacity = String(Math.min(1, pull / (THRESHOLD * 0.85)));
+      if (pull >= THRESHOLD) {
+        icon.style.transform = "rotate(180deg)";
+        text.textContent = "Relâcher pour actualiser";
+      } else {
+        icon.style.transform = "rotate(0deg)";
+        text.textContent = "Tirer pour actualiser";
+      }
+    }
+    function onEnd() {
+      if (!pulling || refreshing) return;
+      pulling = false;
+      bar.classList.remove("ptr-dragging");
+      if (pull >= THRESHOLD) {
+        refreshing = true;
+        bar.style.height = "54px";
+        bar.style.opacity = "1";
+        icon.style.transform = "rotate(0deg)";
+        icon.classList.add("global-ptr-spin");
+        icon.innerHTML = "<path d=\"M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15\"/>";
+        text.textContent = "Actualisation...";
+        if (navigator.vibrate) navigator.vibrate(12);
+        setTimeout(function() { window.location.reload(); }, 350);
+      } else {
+        bar.style.height = "0px";
+        bar.style.opacity = "0";
+      }
+      pull = 0;
+    }
+    window.addEventListener("touchstart", function(e) { if (e.touches.length === 1) onStart(e.touches[0].clientY); }, { passive: true });
+    window.addEventListener("touchmove", function(e) { if (e.touches.length === 1) onMove(e.touches[0].clientY, e); }, { passive: false });
+    window.addEventListener("touchend", onEnd, { passive: true });
+    window.addEventListener("touchcancel", onEnd, { passive: true });
+    window.addEventListener("mousedown", function(e) {
+      if (e.button === 0 && !["INPUT", "BUTTON", "A", "SELECT", "TEXTAREA"].includes((e.target && e.target.tagName) || "")) onStart(e.clientY);
+    });
+    window.addEventListener("mousemove", function(e) { if (pulling) onMove(e.clientY, null); });
+    window.addEventListener("mouseup", onEnd);
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", setupPTR);
+  else setupPTR();
+})();
+</script>
+
+</body>
 </html>

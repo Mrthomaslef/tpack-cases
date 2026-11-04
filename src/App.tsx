@@ -85,6 +85,19 @@ export const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const handleDesktopWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) return;
+      const horiz = (e.target as HTMLElement | null)?.closest?.(".overflow-x-auto") as HTMLElement | null;
+      if (horiz && horiz.scrollWidth > horiz.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        horiz.scrollLeft += e.deltaY;
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("wheel", handleDesktopWheel, { passive: false });
+    return () => window.removeEventListener("wheel", handleDesktopWheel);
+  }, []);
+
+  useEffect(() => {
     refreshCases();
     const savedDrive = loadSavedGoogleDriveConfig();
     setDriveFolderUrl(savedDrive.folderUrlOrId);
